@@ -8,7 +8,7 @@ A PowerShell module that searches Microsoft Purview Content Explorer to determin
 - `ExchangeOnlineManagement` module (installed automatically if `-ConnectIPPS` is used)
 - An active Security & Compliance PowerShell session (`Connect-IPPSSession`) — or use `-ConnectIPPS` to connect automatically
 - The `Export-ContentExplorerData` cmdlet must be available in the session
-- The account used must have the **Content Explorer Content Viewer** or **Content Explorer List Viewer** role in Microsoft Purview
+- The account used must have at minimum the **Content Explorer List Viewer** role in Microsoft Purview (see [Required Permissions](#required-permissions-least-privilege) below)
 
 ## Installation
 
@@ -137,6 +137,47 @@ All activity is written to `Logging.txt` inside the directory specified by `-Log
 | Alias | Command |
 |---|---|
 | `FSLOF` | `Find-SensitivityLabelsOnFilesInM365` |
+
+## Required Permissions (Least Privilege)
+
+### Minimum Purview Role Group
+
+To successfully run `Export-ContentExplorerData`, the account must be a member of:
+
+**✅ Content Explorer List Viewer**
+
+This role group:
+- Allows exporting item metadata and locations
+- Does not allow opening or previewing file contents
+- Is the minimum supported role for the cmdlet
+
+---
+
+### Optional — Preview and Content Access
+
+If you also need to:
+- Preview file contents
+- See sensitive file names in the UI
+
+Then additionally assign:
+
+**✅ Content Explorer Content Viewer**
+
+Microsoft clearly states that:
+- List Viewer and Content Viewer are independent
+- Content Viewer is required to see item names and contents
+- Most export scenarios do **not** require Content Viewer
+---
+
+### Entra ID Roles (Portal Access Only)
+
+To access the Content Explorer UI, but not necessarily export data, the account needs one of the following Entra ID roles:
+
+- Compliance Administrator
+- Security Administrator
+- Compliance Data Administrator
+
+These roles grant access to the **Content Explorer** tab in the Microsoft Purview portal, but do not grant access to the underlying data by themselves. The Purview role groups above are still required to run the cmdlet.
 
 ## License
 
