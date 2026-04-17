@@ -36,6 +36,7 @@ This wrapper addresses all of that.
 | **Retry with backoff** | Failed chunks retry up to 3 times with increasing delay. Persistent failures don't kill the entire scan. |
 | **Chain of custody** | SHA256 hashes input file and all outputs. Writes structured timestamped logs. |
 | **Live progress visibility** | Streaming verbose output, running summary file, real-time master log. |
+| **Companion live monitor** | `Watch-LabelScanProgress.ps1` renders a color dashboard with progress bar, tier breakdown, in-progress detail, and tier-weighted ETA. |
 
 ## Sensitivity tiers
 
@@ -274,14 +275,101 @@ The scan progresses through CRITICAL tier first, so even a full-length run yield
 
 ## Live progress monitoring
 
-Open a **second** PS7 window (don't touch the scan window) and try any of these.
+Open a **second** PS7 window (don't touch the scan window). The recommended monitor is the companion script `Watch-LabelScanProgress.ps1`; ad-hoc one-liners are listed below as fallback.
 
-### Tail the master log live
+### Watch-LabelScanProgress.ps1 (recommended)
+
+A full-screen dashboard that reads `master.log`, per-chunk `console.log`, `MASTER_Results.csv`, and `checkpoint.json` to render:
+
+- **Overall progress bar** (completed / total chunks)
+- **Tier-weighted ETA** with HIGH / MEDIUM / LOW confidence rating — extrapolates remaining time per-tier rather than using a flat average (Internal Use / MEDIUM chunks are typically 20× the size of a CRITICAL chunk, so a naive average badly over- or under-shoots)
+- **Per-chunk status** grouped into COMPLETED, IN PROGRESS, ABANDONED, and PENDING
+- **In-progress detail** (current workload, last log line, running duration)
+- **BY TIER** row counts and chunk completion
+- **STATS** — avg runtime per chunk, master CSV row total, chunks-per-hour pace
+- **Completion banner** when all chunks finish, including master total and run duration
+
+Usage:
+
+```powershell
+# From a fresh PS7 window while the scan is running
+C:\Temp\Watch-LabelScanProgress.ps1
+
+# Different output directory
+C:\Temp\Watch-LabelScanProgress.ps1 -OutputDir "D:\scan\run-01"
+
+# Slower refresh (default is 15 seconds)
+C:\Temp\Watch-LabelScanProgress.ps1 -RefreshSeconds 30
+
+# Append mode (no screen clearing) — useful if you want to scroll history
+C:\Temp\Watch-LabelScanProgress.ps1 -NoClear
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `OutputDir` | `C:\Temp\LabelScan_Chunked` | Must match the `OutputDir` the scan was started with |
+| `RefreshSeconds` | `15` | Redraw interval. Lower = snappier; higher = lower disk churn on checkpoint files |
+| `NoClear` | *(switch)* | Don't clear the screen between refreshes. Lets you scroll back through history |
+
+The monitor is read-only — it never modifies scan output, so it's safe to run any number of instances (e.g., one per display) without interfering with the scan.
+
+Sample output mid-run:
+
+```
+================================================================
+     Chunked Label Scan - Live Progress Monitor
+================================================================
+
+Scan started:    2026-04-17 10:18:56   (running for 26m 14s)
+ETA completion:  2026-04-17 15:17:36   (in approximately 5h 32m)
+ETA confidence:  LOW   (tiers estimated via multiplier: LOW, INFO, MEDIUM)
+ETA breakdown:   CRITICAL=7min   MEDIUM=~272min   LOW=~14min   INFO=~3min
+
+Progress: [###--------------------------]  1 of 10 chunks (10%)
+
+--- COMPLETED ---------------------------------------------
+  [OK ] 01_CRITICAL_HighlySensitive                0 records      3.4 min
+
+--- IN PROGRESS -------------------------------------------
+  [>>>] 02_CRITICAL_Restricted   (running for 23m 41s)
+
+--- PENDING -----------------------------------------------
+  [ ] 03_CRITICAL_Confidential             [CRITICAL]
+  [ ] 04_LOW_TestLabel                     [LOW]
+  [ ] 05_LOW_Public                        [LOW]
+  [ ] 06_INFO_Containers                   [INFO]
+  [ ] 07a_MEDIUM_InternalUse_SPO           [MEDIUM]
+  [ ] 07b_MEDIUM_InternalUse_ODB           [MEDIUM]
+  [ ] 07c_MEDIUM_InternalUse_EXO           [MEDIUM]
+  [ ] 07d_MEDIUM_InternalUse_Teams         [MEDIUM]
+
+--- BY TIER -----------------------------------------------
+  CRITICAL     0 records    (1 of 3 chunks)
+  MEDIUM       0 records    (0 of 4 chunks)
+  LOW          0 records    (0 of 2 chunks)
+  INFO         0 records    (0 of 1 chunks)
+
+--- STATS -------------------------------------------------
+  Avg per chunk:  3.40 min
+  Total scan time: 3.4 min so far
+  Master CSV total: 0 records
+  Pace:            17.6 chunks/hour
+
+(Iteration 32 - refreshing every 15s - Ctrl+C to exit)
+```
+
+Color coding in-terminal: CRITICAL is red, MEDIUM is yellow, LOW is green, INFO is dim gray. The ETA-confidence rating degrades from HIGH (all tiers have measured data) to LOW (most tiers estimated via a multiplier based on CRITICAL runtimes). Abandoned chunks (3 retry attempts exhausted) appear in a dedicated red section so you can spot them without scrolling the scan log.
+
+### Fallback one-liners
+
+If you can't run the companion script (e.g., remote admin-console session with limited scripting), these work from any PS7 prompt.
+
+#### Tail the master log live
 ```powershell
 Get-Content "C:\Temp\LabelScan_Chunked\master.log" -Wait -Tail 30
 ```
 
-### Quick glance at running summary
+#### Quick glance at running summary
 ```powershell
 Get-Content "C:\Temp\LabelScan_Chunked\running_summary.txt"
 ```
@@ -292,7 +380,7 @@ Output looks like:
 [10:15:22] 03_CRITICAL_Confidential           [CRITICAL]    180 records (master total: 239)
 ```
 
-### Check current master any time
+#### Check current master any time
 ```powershell
 Import-Csv "C:\Temp\LabelScan_Chunked\MASTER_Results.csv" |
     Group-Object SensitivityTier |
@@ -302,18 +390,18 @@ Import-Csv "C:\Temp\LabelScan_Chunked\MASTER_Results.csv" |
     Format-Table Name, Count -AutoSize
 ```
 
-### Count CRITICAL findings only
+#### Count CRITICAL findings only
 ```powershell
 (Import-Csv "C:\Temp\LabelScan_Chunked\MASTER_Results.csv" |
     Where-Object SensitivityTier -eq 'CRITICAL').Count
 ```
 
-### List all CRITICAL CSVs across chunks
+#### List all CRITICAL CSVs across chunks
 ```powershell
 Get-ChildItem "C:\Temp\LabelScan_Chunked" -Filter "CRITICAL_*.csv" -Recurse
 ```
 
-### Open master in Excel for live view
+#### Open master in Excel for live view
 ```powershell
 Invoke-Item "C:\Temp\LabelScan_Chunked\MASTER_Results.csv"
 ```
